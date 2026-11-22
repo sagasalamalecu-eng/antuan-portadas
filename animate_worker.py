@@ -24,6 +24,7 @@ import time
 import traceback
 from pathlib import Path
 
+import cv2
 import numpy as np
 import requests
 from PIL import Image
@@ -48,7 +49,8 @@ SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
 FPS = int(os.environ.get("LOOP_FPS", "30"))
 SECONDS = float(os.environ.get("LOOP_SECONDS", "4.0"))  # loop length (FPS*SECONDS frames)
-SIZE = 512             # output video is SIZE×SIZE
+SIZE = 512
+FACE_KEYFRAMES = int(os.environ.get("FACE_KEYFRAMES", "0"))  # >0: fast mode for CPU servers (output video is SIZE×SIZE)
 POLL_SECONDS = 4
 
 sys.path.insert(0, str(LP_DIR))
@@ -115,34 +117,62 @@ def animate(img_rgb: np.ndarray) -> list:
     eye0 = float(np.asarray(calc_eye_close_ratio(lmk[None])).mean())
     can_blink = eye0 > 0.18  # don't "blink" closed eyes / sunglasses-ish crops
 
-    n = int(FPS * SECONDS)
-    frames = []
-    for i in range(n):
-        ph = i / n  # 0..1, never reaches 1 → frame n == frame 0 → perfect loop
-        s = math.sin(2 * math.pi * ph)
+    def render(ph: float) -> np.ndarray:
+        """One frame of the loop. Every curve is a function of cos(2πph) → symmetric: f(ph) == f(1-ph)."""
         c = math.cos(2 * math.pi * ph)
-        s2 = math.sin(4 * math.pi * ph)
+        c2 = math.cos(4 * math.pi * ph)
         # subtle on purpose: bigger values look like a bobble-head
-        d_yaw = 2.2 * s                 # degrees: look left/right
-        d_pitch = 1.0 * c + 0.3 * s2    # slight nod
-        d_roll = 0.8 * math.sin(2 * math.pi * ph + 0.9)  # head tilt
+        d_yaw = 2.2 * c                  # degrees: look left ↔ right and back
+        d_pitch = 0.8 * c2               # slight nod
+        d_roll = 0.7 * c                 # head tilt follows the turn
         breathe = 1.0 + 0.01 * (0.5 - 0.5 * c)
-
         R_d = get_rotation_matrix(pitch0 + d_pitch, yaw0 + d_yaw, roll0 + d_roll)
         x_d = scale * breathe * (kp @ R_d + exp) + tr
-
         if can_blink:
-            blink = math.exp(-(((ph - 0.62) / 0.035) ** 2))  # one quick blink per loop
+            blink = math.exp(-(((ph - 0.5) / 0.035) ** 2))  # one quick blink, centred → symmetric
             if blink > 0.02:
-                ratio = eye0 * (1 - 0.92 * blink)
-                comb = w.calc_combined_eye_ratio([[ratio]], lmk)
+                comb = w.calc_combined_eye_ratio([[eye0 * (1 - 0.92 * blink)]], lmk)
                 x_d = x_d + w.retarget_eye(x_s, comb)
-
         x_d = w.stitching(x_s, x_d)
         out = w.warp_decode(f_s, x_s, x_d)
         face = w.parse_output(out["out"])[0]
-        frames.append(paste_back(face, M_c2o, img_rgb, mask))
-    return frames
+        return paste_back(face, M_c2o, img_rgb, mask)
+
+    n = int(FPS * SECONDS)
+    n -= n % 2
+    half = n // 2
+    # second half of the loop is the first half reversed (motion is symmetric) → render only half
+    if FACE_KEYFRAMES > 0:
+        # fast mode (CPU servers): AI-render a few keyframes, fill the rest with optical-flow interpolation
+        step = max(1, half // FACE_KEYFRAMES)
+        keys = sorted(set(list(range(0, half, step)) + [half - 3, half - 1, half] if can_blink else list(range(0, half, step)) + [half]))
+        rendered = {i: render(i / n) for i in keys}
+        first = [None] * (half + 1)
+        for a, b in zip(keys, keys[1:]):
+            first[a] = rendered[a]
+            for i in range(a + 1, b):
+                first[i] = _interp(rendered[a], rendered[b], (i - a) / (b - a))
+        first[half] = rendered[half]
+    else:
+        first = [render(i / n) for i in range(half + 1)]
+    return first[:half] + [first[n - i] for i in range(half, n)]
+
+
+_DIS = None
+
+
+def _interp(a: np.ndarray, b: np.ndarray, t: float) -> np.ndarray:
+    """Intermediate frame between two close frames using dense optical flow (fast on CPU)."""
+    global _DIS
+    if _DIS is None:
+        _DIS = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+    ga, gb = cv2.cvtColor(a, cv2.COLOR_RGB2GRAY), cv2.cvtColor(b, cv2.COLOR_RGB2GRAY)
+    flow = _DIS.calc(ga, gb, None)  # a → b
+    h, w = ga.shape
+    gx, gy = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+    wa = cv2.remap(a, gx - t * flow[..., 0], gy - t * flow[..., 1], cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    wb = cv2.remap(b, gx + (1 - t) * flow[..., 0], gy + (1 - t) * flow[..., 1], cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    return cv2.addWeighted(wa, 1 - t, wb, t, 0)
 
 
 def make_loop(img: np.ndarray) -> list:
