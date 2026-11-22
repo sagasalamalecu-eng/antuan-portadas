@@ -1,0 +1,22 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.7.1+cpu
+torchvision==0.22.1+cpu
+numpy<2
+pyyaml
+opencv-python-headless
+scipy
+imageio
+imageio-ffmpeg
+tqdm
+rich
+onnx
+onnxruntime
+scikit-image
+tyro<0.9
+pykalman
+pillow
+ffmpeg-python
+requests
+huggingface_hub
+transformers>=4.44,<5
+safetensors
