@@ -176,33 +176,52 @@ def _interp(a: np.ndarray, b: np.ndarray, t: float) -> np.ndarray:
 
 
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
-HF_SPACE = os.environ.get("HF_SPACE", "Lightricks/ltx-video-distilled")
-HF_PROMPT = ("subtle living album cover, the main subject moves gently and naturally, small elegant motion, "
-             "hair, clothes, smoke, water, lights and weather move softly, static camera, no zoom, no cuts, "
-             "keep the exact composition, keep all text and letters perfectly unchanged")
-HF_NEG = ("dancing, big movements, camera movement, zoom, pan, cuts, text changes, morphing letters, "
-          "blurry, distorted, extra limbs, deformed face, watermark")
+HF_SPACE = os.environ.get("HF_SPACE", "zerogpu-aoti/wan2-2-fp8da-aoti-faster")
+HF_NEG = ("camera movement, zoom, pan, cuts, scene change, text changes, morphing letters, style change, "
+          "blurry, distorted, extra limbs, deformed face, watermark, static image, frozen")
+_CAP = None
+
+
+def describe_cover(img: np.ndarray) -> str:
+    """Short English caption of the cover (BLIP, runs on CPU in a few seconds)."""
+    global _CAP
+    try:
+        from transformers import BlipForConditionalGeneration, BlipProcessor
+        if _CAP is None:
+            name = "Salesforce/blip-image-captioning-base"
+            _CAP = (BlipProcessor.from_pretrained(name), BlipForConditionalGeneration.from_pretrained(name).eval())
+        proc, model = _CAP
+        with torch.no_grad():
+            out = model.generate(**proc(images=Image.fromarray(img), return_tensors="pt"), max_new_tokens=30)
+        return proc.decode(out[0], skip_special_tokens=True).strip()
+    except Exception:
+        return "an album cover"
 
 
 def hf_loop(img_url: str):
-    """Real generated motion with a free Hugging Face video model (LTX-Video). Returns (frames, fps) or None."""
+    """Real generated motion with a free Hugging Face video model (Wan 2.2). Returns (frames, fps) or None."""
     if not HF_TOKEN:
         return None
     try:
         from gradio_client import Client, handle_file
+        img = load_image(img_url)
+        caption = describe_cover(img)
+        prompt = (f"{caption}. The image comes alive like an animated album cover: the main subject moves naturally "
+                  "with gentle, graceful motion, hair, clothes, smoke, water, lights and weather move softly, "
+                  "static camera, the same art style, all text stays exactly unchanged")
+        print(f"   [hf] descripción: {caption}")
         local = Path(tempfile.gettempdir()) / f"hf_src_{os.getpid()}.jpg"
-        Image.fromarray(load_image(img_url)).save(local, quality=95)
+        Image.fromarray(img).save(local, quality=95)
         res = Client(HF_SPACE, token=HF_TOKEN, verbose=False).predict(
-            prompt=HF_PROMPT, negative_prompt=HF_NEG, input_image_filepath=handle_file(str(local)),
-            input_video_filepath=None, height_ui=512, width_ui=512, mode="image-to-video", duration_ui=2,
-            ui_frames_to_use=9, seed_ui=42, randomize_seed=False, ui_guidance_scale=1, improve_texture_flag=True,
-            api_name="/image_to_video")
+            input_image=handle_file(str(local)), prompt=prompt, steps=6, negative_prompt=HF_NEG,
+            duration_seconds=1.5, guidance_scale=1, guidance_scale_2=1, seed=7, randomize_seed=False,
+            api_name="/generate_video")
         path = res[0] if isinstance(res, (list, tuple)) else res
         if isinstance(path, dict):
             path = path.get("video") or path.get("path")
         rd = imageio.get_reader(path)
-        fps = int(round(rd.get_meta_data().get("fps", 30)))
-        frames = [np.asarray(f)[..., :3] for f in rd]
+        fps = int(round(rd.get_meta_data().get("fps", 16)))
+        frames = [np.asarray(Image.fromarray(np.asarray(f)[..., :3]).resize((SIZE, SIZE), Image.LANCZOS)) for f in rd]
         rd.close()
         if len(frames) < 8:
             return None
