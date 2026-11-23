@@ -24,7 +24,8 @@ import requests
 ENV = Path(os.environ.get("ANTUAN_ENV", "D:/AntuanAI/.env"))
 POLL_SECONDS = 4
 LIMIT_MB = float(os.environ.get("SONGS_LIMIT_MB", "900"))  # plan gratis de Supabase: 1 GB en total
-FORMAT = "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio"
+# m4a when there is one; otherwise any audio, or even a video with sound (ffmpeg then extracts the audio)
+FORMAT = "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best"
 
 
 def load_env(path: Path):
@@ -99,6 +100,9 @@ def download(vid: str, folder: Path) -> Path:
     m4a = [f for f in files if f.suffix == ".m4a"]
     if p.returncode != 0 or not m4a:
         out = (p.stderr or p.stdout or "yt-dlp falló").strip()
+        if "cookies are no longer valid" in out:
+            # say it plainly in the table: the fix is exporting the cookies again (see ESTADO.md)
+            raise RuntimeError("COOKIES CADUCADAS: exporta otra vez las cookies de la cuenta aparte y guárdalas en YT_COOKIES")
         print(out[-1500:])
         lines = [l for l in out.splitlines() if l.strip()]
         raise RuntimeError(" | ".join(lines[-3:])[:480])
