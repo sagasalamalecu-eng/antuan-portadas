@@ -21,6 +21,8 @@ from pathlib import Path
 
 import requests
 
+import json
+
 ENV = Path(os.environ.get("ANTUAN_ENV", "D:/AntuanAI/.env"))
 POLL_SECONDS = 4
 LIMIT_MB = float(os.environ.get("SONGS_LIMIT_MB", "900"))  # plan gratis de Supabase: 1 GB en total
@@ -177,6 +179,7 @@ def evict():
             break
         try:
             requests.delete(f"{URL}/storage/v1/object/songs/{r['path']}", headers=H(), timeout=30)
+            requests.delete(f"{URL}/storage/v1/object/songs/{r['video_id']}.ritmo.json", headers=H(), timeout=30)
             rest("DELETE", f"song_files?video_id=eq.{r['video_id']}", headers=H())
             total -= r.get("bytes") or 0
             print(f"   [espacio] borrada {r['video_id']} (la que menos se escucha)")
@@ -193,12 +196,62 @@ def work(vid: str):
         path = upload(vid, f)
         finish(vid, status="done", path=path, bytes=size, error=None)
         print(f"[ok] {vid}  {size / 1048576:.1f} MB  {time.time() - t:.0f}s")
+        ritmo(vid, f)
         evict()
     except Exception as e:
         print(f"[fallo] {vid}: {e}")
         finish(vid, status="failed", error=str(e)[:500])
     finally:
         shutil.rmtree(folder, ignore_errors=True)
+
+
+def ritmo(vid: str, file: Path) -> bool:
+    """Modo Teclas: rhythm analysis (beats, hits, vocal melody) → songs/{vid}.ritmo.json. Optional: needs librosa."""
+    try:
+        from rhythm_analysis import analyze
+    except Exception:
+        return False
+    t = time.time()
+    try:
+        data = json.dumps(analyze(file), separators=(",", ":")).encode()
+        r = requests.post(f"{URL}/storage/v1/object/songs/{vid}.ritmo.json", data=data, timeout=60,
+                          headers=H({"Content-Type": "application/json", "x-upsert": "true"}))
+        r.raise_for_status()
+        print(f"   [ritmo] {vid}  {len(data) // 1024} KB  {time.time() - t:.0f}s")
+        return True
+    except Exception as e:
+        print(f"   [ritmo] {vid} falló: {e}")
+        return False
+
+
+def ritmo_missing(max_seconds: float) -> int:
+    """Analyse the songs already in Supabase that don't have their .ritmo.json yet."""
+    try:
+        import rhythm_analysis  # noqa: F401
+    except Exception:
+        print("[ritmo] falta librosa: pip install librosa")
+        return 0
+    r = requests.post(f"{URL}/storage/v1/object/list/songs", headers=H({"Content-Type": "application/json"}),
+                      json={"prefix": "", "limit": 1000, "offset": 0}, timeout=30)
+    r.raise_for_status()
+    names = {o["name"] for o in r.json()}
+    todo = [n[:-4] for n in names if n.endswith(".m4a") and f"{n[:-4]}.ritmo.json" not in names]
+    print(f"[ritmo] canciones sin análisis: {len(todo)}")
+    start, n = time.time(), 0
+    for vid in todo:
+        if time.time() - start > max_seconds:
+            break
+        data = _get_obj(f"songs/{vid}.m4a")
+        if not data:
+            continue
+        folder = Path(tempfile.mkdtemp(prefix="antuan-ritmo-"))
+        try:
+            f = folder / f"{vid}.m4a"
+            f.write_bytes(data)
+            n += ritmo(vid, f)
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+    return n
 
 
 def drain(max_seconds: float = 20 * 60) -> int:
@@ -220,6 +273,10 @@ def drain(max_seconds: float = 20 * 60) -> int:
         work(vid)
         cookies_save()  # yt-dlp has written the renewed cookies into the file
         n += 1
+    # spare time: analyse older songs for Modo Teclas
+    left = max_seconds - (time.time() - start)
+    if left > 60:
+        ritmo_missing(left - 30)
     return n
 
 
@@ -249,7 +306,11 @@ def run():
 
 
 if __name__ == "__main__":
-    if "--drain" in sys.argv:
+    if "--ritmo" in sys.argv:
+        if not URL or not KEY:
+            sys.exit("Falta SUPABASE_URL o SUPABASE_SERVICE_KEY")
+        print("analizadas:", ritmo_missing(20 * 60))
+    elif "--drain" in sys.argv:
         print("procesadas:", drain())
     else:
         run()

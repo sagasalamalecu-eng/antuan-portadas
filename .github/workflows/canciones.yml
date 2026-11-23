@@ -7,6 +7,11 @@ on:
   repository_dispatch:
     types: [nueva-cancion]
   workflow_dispatch:
+    inputs:
+      ritmo:
+        description: 'Analizar el ritmo (Modo Teclas) de las canciones que ya están en Supabase'
+        type: boolean
+        default: false
   schedule:
     - cron: '41 */3 * * *' # red de seguridad por si algún aviso se pierde
 
@@ -26,6 +31,8 @@ jobs:
         id: cola
         run: |
           n=$(curl -s "$SUPABASE_URL/rest/v1/song_files?status=in.(queued,processing)&select=video_id" -H "apikey: $SUPABASE_SERVICE_KEY" | grep -o video_id | wc -l)
+          # a mano con "ritmo": corre aunque la cola esté vacía
+          if [ "${{ inputs.ritmo }}" = "true" ]; then n=1; fi
           echo "pendientes=$n" >> "$GITHUB_OUTPUT"
           echo "Pendientes: $n"
 
@@ -76,3 +83,4 @@ jobs:
           # pide "confirma que no eres un bot" a los servidores de GitHub
           if [ -n "$YT_COOKIES" ]; then echo "$YT_COOKIES" > "$RUNNER_TEMP/cookies.txt"; export YT_COOKIES_FILE="$RUNNER_TEMP/cookies.txt"; fi
           python -X utf8 song_worker.py --drain
+          if [ "${{ inputs.ritmo }}" = "true" ]; then python -X utf8 song_worker.py --ritmo; fi
