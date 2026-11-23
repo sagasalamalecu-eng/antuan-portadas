@@ -175,6 +175,44 @@ def _interp(a: np.ndarray, b: np.ndarray, t: float) -> np.ndarray:
     return cv2.addWeighted(wa, 1 - t, wb, t, 0)
 
 
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
+HF_SPACE = os.environ.get("HF_SPACE", "Lightricks/ltx-video-distilled")
+HF_PROMPT = ("subtle living album cover, the main subject moves gently and naturally, small elegant motion, "
+             "hair, clothes, smoke, water, lights and weather move softly, static camera, no zoom, no cuts, "
+             "keep the exact composition, keep all text and letters perfectly unchanged")
+HF_NEG = ("dancing, big movements, camera movement, zoom, pan, cuts, text changes, morphing letters, "
+          "blurry, distorted, extra limbs, deformed face, watermark")
+
+
+def hf_loop(img_url: str):
+    """Real generated motion with a free Hugging Face video model (LTX-Video). Returns (frames, fps) or None."""
+    if not HF_TOKEN:
+        return None
+    try:
+        from gradio_client import Client, handle_file
+        local = Path(tempfile.gettempdir()) / f"hf_src_{os.getpid()}.jpg"
+        Image.fromarray(load_image(img_url)).save(local, quality=95)
+        res = Client(HF_SPACE, token=HF_TOKEN, verbose=False).predict(
+            prompt=HF_PROMPT, negative_prompt=HF_NEG, input_image_filepath=handle_file(str(local)),
+            input_video_filepath=None, height_ui=512, width_ui=512, mode="image-to-video", duration_ui=2,
+            ui_frames_to_use=9, seed_ui=42, randomize_seed=False, ui_guidance_scale=1, improve_texture_flag=True,
+            api_name="/image_to_video")
+        path = res[0] if isinstance(res, (list, tuple)) else res
+        if isinstance(path, dict):
+            path = path.get("video") or path.get("path")
+        rd = imageio.get_reader(path)
+        fps = int(round(rd.get_meta_data().get("fps", 30)))
+        frames = [np.asarray(f)[..., :3] for f in rd]
+        rd.close()
+        if len(frames) < 8:
+            return None
+        # seamless loop: forward then backward (no jump), dropping the duplicated end frames
+        return frames + frames[-2:0:-1], fps
+    except Exception as e:
+        print(f"   [hf] sin vídeo IA ({type(e).__name__}: {str(e)[:120]}), uso el sistema normal")
+        return None
+
+
 def make_loop(img: np.ndarray) -> list:
     """Face animation (if there is a face) + scene-aware effects for everything else."""
     t = time.time()
@@ -191,11 +229,11 @@ def make_loop(img: np.ndarray) -> list:
     return frames
 
 
-def to_mp4(frames: list) -> bytes:
+def to_mp4(frames: list, fps: int = 0) -> bytes:
     buf = io.BytesIO()
     tmp = Path(tempfile.gettempdir()) / f"loop_{os.getpid()}.mp4"
     tmp.parent.mkdir(parents=True, exist_ok=True)
-    with imageio.get_writer(tmp, fps=FPS, codec="libx264", quality=7, pixelformat="yuv420p",
+    with imageio.get_writer(tmp, fps=fps or FPS, codec="libx264", quality=7, pixelformat="yuv420p",
                             macro_block_size=16, ffmpeg_params=["-movflags", "+faststart"]) as wr:
         for f in frames:
             wr.append_data(np.asarray(Image.fromarray(f).resize((SIZE, SIZE), Image.LANCZOS)))
@@ -252,7 +290,7 @@ def finish(key, **fields):
 
 
 def upload(key, data: bytes) -> str:
-    path = f"{key}.mp4"
+    path = f"{key}-{int(time.time())}.mp4"  # new name each time → phones never get a stale cached video
     r = requests.post(f"{SUPABASE_URL}/storage/v1/object/loops/{path}", data=data, timeout=120,
                       headers=H({"Content-Type": "video/mp4", "x-upsert": "true", "cache-control": "31536000"}))
     r.raise_for_status()
@@ -276,8 +314,15 @@ def drain(max_seconds: float = 600) -> int:
             break
         key, url = job["cover_key"], job["cover_url"]
         try:
-            frames = make_loop(load_image(url))
-            finish(key, status="done", video_path=upload(key, to_mp4(frames)), error=None)
+            t0 = time.time()
+            hf = hf_loop(url)
+            if hf:
+                frames, fps = hf
+                data = to_mp4(frames, fps)
+                print(f"   [hf] vídeo IA real en {time.time() - t0:.0f}s")
+            else:
+                data = to_mp4(make_loop(load_image(url)))
+            finish(key, status="done", video_path=upload(key, data), error=None)
             done += 1
             print(f"[ok] {url[:70]}")
         except Exception as e:
