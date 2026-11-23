@@ -180,6 +180,8 @@ HF_SPACE = os.environ.get("HF_SPACE", "zerogpu-aoti/wan2-2-fp8da-aoti-faster")
 HF_NEG = ("camera movement, zoom, pan, cuts, scene change, text changes, morphing letters, style change, "
           "blurry, distorted, extra limbs, deformed face, watermark, static image, frozen")
 _CAP = None
+# the free Hugging Face account has a small daily ZeroGPU quota; once it's spent, stop asking for the rest of the run
+HF_OUT = False
 
 
 def describe_cover(img: np.ndarray) -> str:
@@ -200,7 +202,8 @@ def describe_cover(img: np.ndarray) -> str:
 
 def hf_loop(img_url: str):
     """Real generated motion with a free Hugging Face video model (Wan 2.2). Returns (frames, fps) or None."""
-    if not HF_TOKEN:
+    global HF_OUT
+    if not HF_TOKEN or HF_OUT:
         return None
     try:
         from gradio_client import Client, handle_file
@@ -228,7 +231,12 @@ def hf_loop(img_url: str):
         # seamless loop: forward then backward (no jump), dropping the duplicated end frames
         return frames + frames[-2:0:-1], fps
     except Exception as e:
-        print(f"   [hf] sin vídeo IA ({type(e).__name__}: {str(e)[:120]}), uso el sistema normal")
+        msg = str(e)
+        if "ZeroGPU" in msg or "quota" in msg.lower():
+            HF_OUT = True
+            print("   [hf] cupo diario de Hugging Face gastado: el resto de esta tanda, sistema normal (se rehará con IA)")
+        else:
+            print(f"   [hf] sin vídeo IA ({type(e).__name__}: {msg[:120]}), uso el sistema normal")
         return None
 
 
@@ -308,8 +316,9 @@ def finish(key, **fields):
     rest("PATCH", f"cover_loops?cover_key=eq.{key}", headers=H({"Content-Type": "application/json"}), json=fields)
 
 
-def upload(key, data: bytes) -> str:
-    path = f"{key}-{int(time.time())}.mp4"  # new name each time → phones never get a stale cached video
+def upload(key, data: bytes, ai: bool = False) -> str:
+    # new name each time → phones never get a stale cached video; "ai-" = real Hugging Face video (no redo)
+    path = f"{'ai-' if ai else ''}{key}-{int(time.time())}.mp4"
     r = requests.post(f"{SUPABASE_URL}/storage/v1/object/loops/{path}", data=data, timeout=120,
                       headers=H({"Content-Type": "video/mp4", "x-upsert": "true", "cache-control": "31536000"}))
     r.raise_for_status()
@@ -341,12 +350,49 @@ def drain(max_seconds: float = 600) -> int:
                 print(f"   [hf] vídeo IA real en {time.time() - t0:.0f}s")
             else:
                 data = to_mp4(make_loop(load_image(url)))
-            finish(key, status="done", video_path=upload(key, data), error=None)
+            finish(key, status="done", video_path=upload(key, data, ai=bool(hf)), error=None)
             done += 1
             print(f"[ok] {url[:70]}")
         except Exception as e:
             traceback.print_exc()
             finish(key, status="failed", error=str(e)[:500])
+    done += upgrade(max_seconds - (time.time() - start))
+    return done
+
+
+def remove(path: str):
+    try:
+        requests.delete(f"{SUPABASE_URL}/storage/v1/object/loops/{path}", headers=H(), timeout=30)
+    except Exception:
+        pass
+
+
+def upgrade(max_seconds: float) -> int:
+    """Queue empty: redo with Hugging Face the covers that got the normal loop (quota spent that day),
+    newest first, until the daily quota runs out again. The 6-hourly run keeps going on later days."""
+    if not HF_TOKEN or HF_OUT:
+        return 0
+    start, done, skip = time.time(), 0, set()
+    while time.time() - start < max_seconds and not HF_OUT:
+        rows = rest("GET", "cover_loops?status=eq.done&video_path=not.like.ai-*&order=requested_at.desc&limit=25"
+                    "&select=cover_key,cover_url,video_path", headers=H())
+        rows = [r for r in rows or [] if r["cover_key"] not in skip]
+        if not rows:
+            break
+        row = rows[0]
+        skip.add(row["cover_key"])
+        try:
+            hf = hf_loop(row["cover_url"])
+            if not hf:
+                continue
+            frames, fps = hf
+            finish(row["cover_key"], status="done", video_path=upload(row["cover_key"], to_mp4(frames, fps), ai=True), error=None)
+            if row.get("video_path"):
+                remove(row["video_path"])
+            done += 1
+            print(f"[ia] rehecha con vídeo IA: {row['cover_url'][:70]}")
+        except Exception:
+            traceback.print_exc()
     return done
 
 

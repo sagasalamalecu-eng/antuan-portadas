@@ -8,7 +8,7 @@ on:
     types: [nueva-portada]
   workflow_dispatch:
   schedule:
-    - cron: '17 */6 * * *' # red de seguridad cada 6 h por si algún aviso se pierde
+    - cron: '17 */6 * * *' # red de seguridad cada 6 h (avisos perdidos) y rehacer con IA cuando vuelve el cupo de Hugging Face
 
 concurrency:
   group: portadas
@@ -34,8 +34,11 @@ jobs:
         id: cola
         run: |
           n=$(curl -s "$SUPABASE_URL/rest/v1/cover_loops?status=in.(queued,processing)&select=cover_key" -H "apikey: $SUPABASE_SERVICE_KEY" | grep -o cover_key | wc -l)
-          echo "pendientes=$n" >> "$GITHUB_OUTPUT"
-          echo "Pendientes: $n"
+          # portadas hechas sin vídeo IA (cupo diario de Hugging Face gastado): se rehacen cuando hay cupo
+          m=$(curl -s -G "$SUPABASE_URL/rest/v1/cover_loops" --data-urlencode "status=eq.done" --data-urlencode "video_path=not.like.ai-*" --data-urlencode "select=cover_key" --data-urlencode "limit=1" -H "apikey: $SUPABASE_SERVICE_KEY" | grep -o cover_key | wc -l)
+          [ -z "$HF_TOKEN" ] && m=0
+          echo "pendientes=$((n + m))" >> "$GITHUB_OUTPUT"
+          echo "Pendientes: $n · sin vídeo IA por rehacer: $m"
 
       - uses: actions/setup-python@v5
         if: steps.cola.outputs.pendientes != '0'
