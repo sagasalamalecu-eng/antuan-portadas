@@ -86,7 +86,7 @@ def ytdlp() -> str:
 
 
 def download(vid: str, folder: Path) -> Path:
-    cmd = [ytdlp(), "-q", "--no-warnings", "--no-playlist", "--no-progress", "-f", FORMAT,
+    cmd = [ytdlp(), "-q", "--no-playlist", "--no-progress", "-f", FORMAT,
            "-x", "--audio-format", "m4a", "--max-filesize", "24M",
            "-o", str(folder / "%(id)s.%(ext)s")]
     # servers (GitHub) get "confirm you're not a bot": they go signed in with a SEPARATE Google account's cookies
@@ -98,7 +98,10 @@ def download(vid: str, folder: Path) -> Path:
     files = sorted(folder.glob(f"{vid}.*"), key=lambda f: f.stat().st_size, reverse=True)
     m4a = [f for f in files if f.suffix == ".m4a"]
     if p.returncode != 0 or not m4a:
-        raise RuntimeError((p.stderr or p.stdout or "yt-dlp falló").strip().splitlines()[-1][:400])
+        out = (p.stderr or p.stdout or "yt-dlp falló").strip()
+        print(out[-1500:])
+        lines = [l for l in out.splitlines() if l.strip()]
+        raise RuntimeError(" | ".join(lines[-3:])[:480])
     return m4a[0]
 
 
