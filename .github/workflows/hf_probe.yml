@@ -21,7 +21,7 @@ jobs:
           from gradio_client import Client
           for space in ["Lightricks/ltx-video-distilled", "Lightricks/LTX-Video-Playground", "multimodalart/wan2-1-fast", "zerogpu-aoti/wan2-2-fp8da-aoti-faster", "Wan-AI/Wan2.2-TI2V-5B"]:
               try:
-                  c = Client(space, hf_token=os.environ["HF_TOKEN"], verbose=False)
+                  c = Client(space, token=os.environ["HF_TOKEN"], verbose=False)
                   api = c.view_api(return_format="dict", print_info=False)
                   eps = api.get("named_endpoints", {})
                   print("\n==", space, "OK")
