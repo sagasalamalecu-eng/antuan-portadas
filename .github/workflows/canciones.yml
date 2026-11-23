@@ -46,6 +46,7 @@ jobs:
         if: steps.cola.outputs.pendientes != '0'
         run: |
           pip install -q -U "yt-dlp[default]" requests
+          command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null)
           yt-dlp --version
           ffmpeg -version | head -1
 
