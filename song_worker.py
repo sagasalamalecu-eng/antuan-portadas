@@ -79,6 +79,55 @@ def requeue_stale():
          json={"status": "queued"})
 
 
+# ── YouTube session cookies (cloud) ──
+# YouTube renews the session cookies on every visit; GitHub starts each run from the secret, which goes stale
+# and the session dies. So the renewed jar is kept in the PRIVATE "worker" bucket (only this service key can
+# read it, not the app's accounts) and reused; a NEW export pasted into the secret replaces it.
+COOKIE_OBJ = "worker/yt_cookies.txt"
+COOKIE_META = "worker/yt_cookies.sha"
+
+
+def _get_obj(path: str):
+    r = requests.get(f"{URL}/storage/v1/object/{path}", headers=H(), timeout=30)
+    return r.content if r.status_code == 200 else None
+
+
+def _put_obj(path: str, data: bytes, ctype="text/plain"):
+    requests.post(f"{URL}/storage/v1/object/{path}", data=data, timeout=30,
+                  headers=H({"Content-Type": ctype, "x-upsert": "true"}))
+
+
+def cookies_load():
+    """Use the renewed jar from Supabase unless the secret holds a newer export."""
+    f = os.environ.get("YT_COOKIES_FILE", "")
+    if not f or not Path(f).exists():
+        return
+    import hashlib
+    secret = Path(f).read_bytes()
+    sha = hashlib.sha256(secret).hexdigest().encode()
+    try:
+        if _get_obj(COOKIE_META) == sha:
+            jar = _get_obj(COOKIE_OBJ)
+            if jar:
+                Path(f).write_bytes(jar)
+                print("[cookies] uso la sesión renovada guardada")
+                return
+        _put_obj(COOKIE_META, sha)
+        _put_obj(COOKIE_OBJ, secret)
+        print("[cookies] exportación nueva del secreto")
+    except Exception as e:
+        print("[cookies] no se pudo sincronizar:", e)
+
+
+def cookies_save():
+    f = os.environ.get("YT_COOKIES_FILE", "")
+    if f and Path(f).exists() and Path(f).stat().st_size > 0:
+        try:
+            _put_obj(COOKIE_OBJ, Path(f).read_bytes())
+        except Exception as e:
+            print("[cookies] no se pudo guardar:", e)
+
+
 def ytdlp() -> str:
     exe = shutil.which("yt-dlp")
     if not exe:
@@ -158,6 +207,7 @@ def drain(max_seconds: float = 20 * 60) -> int:
         sys.exit("Falta SUPABASE_URL o SUPABASE_SERVICE_KEY")
     ytdlp()
     requeue_stale()
+    cookies_load()
     start, n = time.time(), 0
     while time.time() - start < max_seconds:
         vid = claim()
@@ -168,6 +218,7 @@ def drain(max_seconds: float = 20 * 60) -> int:
             if not vid:
                 break
         work(vid)
+        cookies_save()  # yt-dlp has written the renewed cookies into the file
         n += 1
     return n
 
