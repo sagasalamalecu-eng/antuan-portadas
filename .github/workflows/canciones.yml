@@ -51,4 +51,10 @@ jobs:
 
       - name: Bajar y subir canciones
         if: steps.cola.outputs.pendientes != '0'
-        run: python -X utf8 song_worker.py --drain
+        env:
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        run: |
+          # sesión de una cuenta de Google APARTE (secreto YT_COOKIES, formato cookies.txt); sin ella YouTube
+          # pide "confirma que no eres un bot" a los servidores de GitHub
+          if [ -n "$YT_COOKIES" ]; then echo "$YT_COOKIES" > "$RUNNER_TEMP/cookies.txt"; export YT_COOKIES_FILE="$RUNNER_TEMP/cookies.txt"; fi
+          python -X utf8 song_worker.py --drain

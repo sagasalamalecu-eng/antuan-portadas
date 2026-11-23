@@ -88,7 +88,12 @@ def ytdlp() -> str:
 def download(vid: str, folder: Path) -> Path:
     cmd = [ytdlp(), "-q", "--no-warnings", "--no-playlist", "--no-progress", "-f", FORMAT,
            "-x", "--audio-format", "m4a", "--max-filesize", "24M",
-           "-o", str(folder / "%(id)s.%(ext)s"), f"https://www.youtube.com/watch?v={vid}"]
+           "-o", str(folder / "%(id)s.%(ext)s")]
+    # servers (GitHub) get "confirm you're not a bot": they go signed in with a SEPARATE Google account's cookies
+    cookies = os.environ.get("YT_COOKIES_FILE", "")
+    if cookies and Path(cookies).exists() and Path(cookies).stat().st_size > 0:
+        cmd += ["--cookies", cookies]
+    cmd.append(f"https://www.youtube.com/watch?v={vid}")
     p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
     files = sorted(folder.glob(f"{vid}.*"), key=lambda f: f.stat().st_size, reverse=True)
     m4a = [f for f in files if f.suffix == ".m4a"]
