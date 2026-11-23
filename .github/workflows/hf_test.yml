@@ -16,19 +16,20 @@ jobs:
           from gradio_client import Client, handle_file
           img = "cover.jpg"
           urllib.request.urlretrieve("https://cdn-images.dzcdn.net/images/cover/f840891b70f6e240b8ecaec49346bd6a/1000x1000-000000-80-0-0.jpg", img)
-          prompt = ("subtle cinematic living album cover, the main subject moves naturally and gently, "
-                    "the horse bucks softly, hair and clothes move slightly, static camera, "
-                    "keep the exact composition, keep all text and letters perfectly unchanged")
-          neg = "text changes, morphing letters, camera movement, zoom, cuts, blurry, distorted, extra limbs, watermark"
+          strong = ("animated album cover, the bucking horse rears and kicks its hind legs, the rider sways and waves his arm, "
+                    "lively natural motion, static camera, the background and the handwritten text stay still")
+          neg = "camera movement, zoom, pan, cuts, morphing text, blurry, distorted, extra limbs, watermark, static image, frozen"
           tok = os.environ["HF_TOKEN"]
+          def ltx(g, dur):
+              return dict(prompt=strong, negative_prompt=neg, input_image_filepath=handle_file(img), input_video_filepath=None,
+                          height_ui=512, width_ui=512, mode="image-to-video", duration_ui=dur, ui_frames_to_use=9,
+                          seed_ui=7, randomize_seed=False, ui_guidance_scale=g, improve_texture_flag=True)
           tests = [
-            ("wan21", "multimodalart/wan2-1-fast", "/generate_video",
-             dict(input_image=handle_file(img), prompt=prompt, height=512, width=512, negative_prompt=neg,
-                  duration_seconds=2, guidance_scale=1.0, steps=4, seed=42, randomize_seed=False)),
-            ("ltx", "Lightricks/ltx-video-distilled", "/image_to_video",
-             dict(prompt=prompt, negative_prompt=neg, input_image_filepath=handle_file(img), input_video_filepath=None,
-                  height_ui=512, width_ui=512, mode="image-to-video", duration_ui=2, ui_frames_to_use=9,
-                  seed_ui=42, randomize_seed=False, ui_guidance_scale=1, improve_texture_flag=True)),
+            ("ltx_g1", "Lightricks/ltx-video-distilled", "/image_to_video", ltx(1, 3)),
+            ("ltx_g3", "Lightricks/ltx-video-distilled", "/image_to_video", ltx(3, 3)),
+            ("wan22", "zerogpu-aoti/wan2-2-fp8da-aoti-faster", "/generate_video",
+             dict(input_image=handle_file(img), prompt=strong, steps=6, negative_prompt=neg, duration_seconds=3,
+                  guidance_scale=1, guidance_scale_2=1, seed=7, randomize_seed=False)),
           ]
           os.makedirs("out", exist_ok=True)
           for name, space, api, kw in tests:
