@@ -1,0 +1,49 @@
+name: Prueba vídeo IA
+on: workflow_dispatch
+jobs:
+  probar:
+    runs-on: ubuntu-latest
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -q gradio_client && sudo apt-get install -y -qq ffmpeg > /dev/null
+      - name: Generar
+        run: |
+          python - <<'PY'
+          import os, time, shutil, urllib.request
+          from gradio_client import Client, handle_file
+          img = "cover.jpg"
+          urllib.request.urlretrieve("https://cdn-images.dzcdn.net/images/cover/f840891b70f6e240b8ecaec49346bd6a/1000x1000-000000-80-0-0.jpg", img)
+          prompt = ("subtle cinematic living album cover, the main subject moves naturally and gently, "
+                    "the horse bucks softly, hair and clothes move slightly, static camera, "
+                    "keep the exact composition, keep all text and letters perfectly unchanged")
+          neg = "text changes, morphing letters, camera movement, zoom, cuts, blurry, distorted, extra limbs, watermark"
+          tok = os.environ["HF_TOKEN"]
+          tests = [
+            ("wan21", "multimodalart/wan2-1-fast", "/generate_video",
+             dict(input_image=handle_file(img), prompt=prompt, height=512, width=512, negative_prompt=neg,
+                  duration_seconds=2, guidance_scale=1.0, steps=4, seed=42, randomize_seed=False)),
+            ("ltx", "Lightricks/ltx-video-distilled", "/image_to_video",
+             dict(prompt=prompt, negative_prompt=neg, input_image_filepath=handle_file(img), input_video_filepath=None,
+                  height_ui=512, width_ui=512, mode="image-to-video", duration_ui=2, ui_frames_to_use=9,
+                  seed_ui=42, randomize_seed=False, ui_guidance_scale=1, improve_texture_flag=True)),
+          ]
+          os.makedirs("out", exist_ok=True)
+          for name, space, api, kw in tests:
+              t = time.time()
+              try:
+                  res = Client(space, token=tok, verbose=False).predict(api_name=api, **kw)
+                  path = res[0] if isinstance(res, (list, tuple)) else res
+                  if isinstance(path, dict): path = path.get("video") or path.get("path")
+                  shutil.copy(path, f"out/{name}.mp4")
+                  print(f"[{name}] OK en {time.time()-t:.0f}s")
+              except Exception as e:
+                  print(f"[{name}] FALLA en {time.time()-t:.0f}s: {type(e).__name__}: {str(e)[:200]}")
+          PY
+      - name: Bucle ida y vuelta
+        run: |
+          cd out && for f in *.mp4; do ffmpeg -loglevel error -y -i "$f" -filter_complex "[0:v]reverse[r];[0:v][r]concat=n=2:v=1[v]" -map "[v]" -c:v libx264 -pix_fmt yuv420p "loop_$f"; done; ls -la
+      - uses: actions/upload-artifact@v4
+        with: { name: videos, path: out/ }
