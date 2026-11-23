@@ -1,0 +1,33 @@
+name: Probar Hugging Face
+on: workflow_dispatch
+jobs:
+  probar:
+    runs-on: ubuntu-latest
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+    steps:
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install -q gradio_client huggingface_hub
+      - name: Token y espacios
+        run: |
+          python - <<'PY'
+          import os, json
+          from huggingface_hub import whoami
+          try:
+              print("TOKEN OK, usuario:", whoami(token=os.environ["HF_TOKEN"])["name"])
+          except Exception as e:
+              print("TOKEN MAL:", type(e).__name__)
+          from gradio_client import Client
+          for space in ["Lightricks/ltx-video-distilled", "Lightricks/LTX-Video-Playground", "multimodalart/wan2-1-fast", "zerogpu-aoti/wan2-2-fp8da-aoti-faster", "Wan-AI/Wan2.2-TI2V-5B"]:
+              try:
+                  c = Client(space, hf_token=os.environ["HF_TOKEN"], verbose=False)
+                  api = c.view_api(return_format="dict", print_info=False)
+                  eps = api.get("named_endpoints", {})
+                  print("\n==", space, "OK")
+                  for name, ep in list(eps.items())[:6]:
+                      params = [(p.get("parameter_name"), p.get("python_type", {}).get("type"), p.get("parameter_default")) for p in ep.get("parameters", [])]
+                      print("  ", name, params[:14])
+              except Exception as e:
+                  print("\n==", space, "FALLA:", type(e).__name__, str(e)[:120])
+          PY
