@@ -1,0 +1,54 @@
+# Baja las canciones que piden los móviles de Antuan Music y las sube al almacén privado de Supabase,
+# sin el PC encendido. Supabase avisa al pedir una canción (repository_dispatch "nueva-cancion",
+# ver supabase_aviso_canciones.sql); también se puede lanzar a mano desde la pestaña Actions.
+name: Canciones
+
+on:
+  repository_dispatch:
+    types: [nueva-cancion]
+  workflow_dispatch:
+  schedule:
+    - cron: '41 */3 * * *' # red de seguridad por si algún aviso se pierde
+
+concurrency:
+  group: canciones
+  cancel-in-progress: false
+
+jobs:
+  bajar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+    steps:
+      - name: ¿Hay canciones en la cola?
+        id: cola
+        run: |
+          n=$(curl -s "$SUPABASE_URL/rest/v1/song_files?status=in.(queued,processing)&select=video_id" -H "apikey: $SUPABASE_SERVICE_KEY" | grep -o video_id | wc -l)
+          echo "pendientes=$n" >> "$GITHUB_OUTPUT"
+          echo "Pendientes: $n"
+
+      - uses: actions/checkout@v4
+        if: steps.cola.outputs.pendientes != '0'
+
+      - uses: actions/setup-python@v5
+        if: steps.cola.outputs.pendientes != '0'
+        with:
+          python-version: '3.12'
+
+      - uses: denoland/setup-deno@v2
+        if: steps.cola.outputs.pendientes != '0'
+        with:
+          deno-version: v2.x
+
+      - name: Instalar yt-dlp
+        if: steps.cola.outputs.pendientes != '0'
+        run: |
+          pip install -q -U "yt-dlp[default]" requests
+          yt-dlp --version
+          ffmpeg -version | head -1
+
+      - name: Bajar y subir canciones
+        if: steps.cola.outputs.pendientes != '0'
+        run: python -X utf8 song_worker.py --drain
