@@ -180,6 +180,8 @@ def evict():
         try:
             requests.delete(f"{URL}/storage/v1/object/songs/{r['path']}", headers=H(), timeout=30)
             requests.delete(f"{URL}/storage/v1/object/songs/{r['video_id']}.ritmo.json", headers=H(), timeout=30)
+            for kind in ("inst", "vocals"):
+                requests.delete(f"{URL}/storage/v1/object/songs/{r['video_id']}.{kind}.m4a", headers=H(), timeout=30)
             rest("DELETE", f"song_files?video_id=eq.{r['video_id']}", headers=H())
             total -= r.get("bytes") or 0
             print(f"   [espacio] borrada {r['video_id']} (la que menos se escucha)")

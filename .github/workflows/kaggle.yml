@@ -26,3 +26,5 @@ jobs:
         with: { python-version: '3.12' }
       - run: pip install -q kaggle six requests
       - run: python -X utf8 kaggle_bridge.py
+        continue-on-error: true
+      - run: python -X utf8 kaggle_voz.py
