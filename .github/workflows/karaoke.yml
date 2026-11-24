@@ -8,7 +8,7 @@ on:
     workflows: [Canciones]
     types: [completed]
   schedule:
-    - cron: '50 */6 * * *'
+    - cron: '50 */2 * * *'
 
 concurrency:
   group: karaoke
@@ -17,7 +17,7 @@ concurrency:
 jobs:
   separar:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -51,3 +51,4 @@ jobs:
       - name: Separar voz y beat
         if: steps.cola.outputs.hay == 'si'
         run: python -X utf8 voz_cpu.py
+        env: { VOZ_BUDGET_S: "6600" }
