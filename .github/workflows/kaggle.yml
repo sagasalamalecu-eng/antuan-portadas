@@ -1,0 +1,28 @@
+# Portadas con Wan 2.2 en la GPU gratis de Kaggle (30 h/semana, sin tarjeta, sin el PC).
+# Cada 2 h: recoge la tanda terminada, sube los vídeos a Supabase y lanza la siguiente (kaggle_bridge.py).
+# Si se acaba el cupo semanal, espera sola a que Kaggle lo reinicie.
+name: Kaggle Wan
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '5 */2 * * *'
+
+concurrency:
+  group: kaggle
+  cancel-in-progress: false
+
+jobs:
+  puente:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      KAGGLE_CREDENTIALS: ${{ secrets.KAGGLE_CREDENTIALS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install -q kaggle six requests
+      - run: python -X utf8 kaggle_bridge.py
