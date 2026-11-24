@@ -177,8 +177,12 @@ def _interp(a: np.ndarray, b: np.ndarray, t: float) -> np.ndarray:
 
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 HF_SPACE = os.environ.get("HF_SPACE", "zerogpu-aoti/wan2-2-fp8da-aoti-faster")
-HF_NEG = ("camera movement, zoom, pan, cuts, scene change, text changes, morphing letters, style change, "
-          "blurry, distorted, extra limbs, deformed face, watermark, static image, frozen")
+HF_NEG = ("camera movement, zoom, pan, dolly, camera shake, cuts, scene change, new objects, new people, "
+          "face change, identity change, different face, face morphing, changing expression drastically, "
+          "deformed face, warped eyes, extra limbs, extra fingers, melting, morphing background, "
+          "text changes, morphing letters, new text, logo changes, style change, color shift, "
+          "sharpening blurry areas, refocusing, revealing details hidden by blur, depth of field change, "
+          "flicker, watermark, static image, frozen")
 _CAP = None
 # the free Hugging Face account has a small daily ZeroGPU quota; once it's spent, stop asking for the rest of the run
 HF_OUT = False
@@ -200,6 +204,49 @@ def describe_cover(img: np.ndarray) -> str:
         return "an album cover"
 
 
+def cover_prompt(caption: str) -> str:
+    """Orchestrator prompt for image-to-video: animate only what physically can move in THIS picture,
+    keep identity, framing, focus and text exactly as in the original."""
+    # only name motions for things the caption actually saw: listing "rain" for a sunny garden makes Wan add rain
+    c = f" {caption.lower()} "
+    moves = []
+    for words, move in _MOTIONS:
+        if any(w in c for w in words) and move not in moves:
+            moves.append(move)
+    people = any(w in c for w in _PEOPLE)
+    if not moves and not people:
+        moves.append("the light shifts very softly")
+    motion = ", ".join(moves[:4])
+    return (
+        f"{caption}. A subtle living version of this exact photo"
+        + (f": {motion}" if motion else "")
+        + (". The person breathes, blinks and moves naturally and slightly, with the same face, identity and "
+           "expression" if people else "")
+        + ". Nothing else is added: no rain, snow, smoke, particles, people or objects that are not already in the "
+          "photo. The camera is completely still, same framing, no zoom, no pan. Blurry or motion-blurred areas stay "
+          "exactly as blurry, never sharpened or refocused. Same colors, lighting, grain and style; all text and "
+          "logos unchanged. Calm, smooth motion that can loop."
+    )
+
+
+_PEOPLE = (" man ", " woman ", " men ", " women ", " person ", " people ", " boy ", " girl ", " guy ", " face ",
+           " singer ", " rapper ", " child ", " kid ", " couple ", " his ", " her ")
+_MOTIONS = [
+    ((" rain", " raining", " storm"), "the rain keeps falling"),
+    ((" snow",), "snowflakes keep falling"),
+    ((" neon", " lights", " lamp", " sign", " city at night", " street at night"), "the lights flicker gently"),
+    ((" fire", " flame", " candle"), "the flames flicker"),
+    ((" smoke", " fog", " mist", " cloud"), "the smoke and clouds drift slowly"),
+    ((" water", " sea", " ocean", " river", " pool", " lake", " wave"), "the water ripples"),
+    ((" tree", " palm", " leaves", " plant", " garden", " grass", " forest", " jungle", " flower", " field"),
+     "leaves and grass sway softly in a light breeze"),
+    ((" hair",), "the hair moves in the wind"),
+    ((" dress", " shirt", " jacket", " flag", " curtain"), "the fabric moves slightly in the wind"),
+    ((" car ", " road", " highway"), "light reflections slide over the surfaces"),
+    ((" sky", " sunset", " sun "), "the clouds in the sky drift slowly"),
+]
+
+
 def hf_loop(img_url: str):
     """Real generated motion with a free Hugging Face video model (Wan 2.2). Returns (frames, fps) or None."""
     global HF_OUT
@@ -209,9 +256,7 @@ def hf_loop(img_url: str):
         from gradio_client import Client, handle_file
         img = load_image(img_url)
         caption = describe_cover(img)
-        prompt = (f"{caption}. The image comes alive like an animated album cover: the main subject moves naturally "
-                  "with gentle, graceful motion, hair, clothes, smoke, water, lights and weather move softly, "
-                  "static camera, the same art style, all text stays exactly unchanged")
+        prompt = cover_prompt(caption)
         print(f"   [hf] descripción: {caption}")
         local = Path(tempfile.gettempdir()) / f"hf_src_{os.getpid()}.jpg"
         Image.fromarray(img).save(local, quality=95)
