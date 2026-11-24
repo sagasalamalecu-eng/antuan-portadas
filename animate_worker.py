@@ -240,6 +240,8 @@ _MOTIONS = [
     ((" water", " sea", " ocean", " river", " pool", " lake", " wave"), "the water ripples"),
     ((" tree", " palm", " leaves", " plant", " garden", " grass", " forest", " jungle", " flower", " field"),
      "leaves and grass sway softly in a light breeze"),
+    ((" horse", " dog", " cat ", " bird", " animal", " bull", " lion", " tiger", " wolf"),
+     "the animal moves naturally in place, its head, mane, tail and body moving"),
     ((" hair",), "the hair moves in the wind"),
     ((" dress", " shirt", " jacket", " flag", " curtain"), "the fabric moves slightly in the wind"),
     ((" car ", " road", " highway"), "light reflections slide over the surfaces"),
