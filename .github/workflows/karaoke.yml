@@ -1,0 +1,53 @@
+# "Quitar la voz" en los servidores de GitHub (sin el PC): separa beat y voz de las canciones guardadas
+# que aún no los tienen (voz_cpu.py). Cada 6 h y después de cada tanda de "Canciones"; a mano en Actions.
+name: Karaoke
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Canciones]
+    types: [completed]
+  schedule:
+    - cron: '50 */6 * * *'
+
+concurrency:
+  group: karaoke
+  cancel-in-progress: false
+
+jobs:
+  separar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+    steps:
+      - name: ¿Hay canciones sin karaoke?
+        id: cola
+        run: |
+          n=$(curl -s "$SUPABASE_URL/rest/v1/song_files?status=eq.done&select=video_id" -H "apikey: $SUPABASE_SERVICE_KEY" | grep -o video_id | wc -l)
+          m=$(curl -s -X POST "$SUPABASE_URL/storage/v1/object/list/songs" -H "apikey: $SUPABASE_SERVICE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" -H "Content-Type: application/json" -d '{"prefix":"","limit":10000}' | grep -o '\.inst\.m4a' | wc -l)
+          echo "Canciones: $n · con karaoke: $m"
+          if [ "$n" -gt "$m" ]; then echo "hay=si" >> "$GITHUB_OUTPUT"; else echo "hay=no" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/checkout@v4
+        if: steps.cola.outputs.hay == 'si'
+      - uses: actions/setup-python@v5
+        if: steps.cola.outputs.hay == 'si'
+        with: { python-version: '3.11' }
+      - name: Modelo y ffmpeg (caché)
+        if: steps.cola.outputs.hay == 'si'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/voz_models
+            ~/.cache/pip
+          key: voz-v1
+      - name: Instalar
+        if: steps.cola.outputs.hay == 'si'
+        run: |
+          sudo apt-get install -y -qq ffmpeg > /dev/null
+          pip install -q "audio-separator[cpu]" requests
+      - name: Separar voz y beat
+        if: steps.cola.outputs.hay == 'si'
+        run: python -X utf8 voz_cpu.py
