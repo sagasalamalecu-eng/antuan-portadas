@@ -35,6 +35,7 @@ gpu_image = (
 cpu_image = modal.Image.debian_slim(python_version="3.11").pip_install("requests")
 secrets = [modal.Secret.from_name("antuan-supabase")]
 
+GPU = os.environ.get("WAN_GPU", "A10G")
 STEPS = int(os.environ.get("WAN_STEPS", "30"))
 FRAMES = 49          # 4k+1 frames → ~2 s at 24 fps; the loop is forward + backward (~4 s)
 SIDE = 704           # square covers; Wan 2.2 5B wants multiples of 32
@@ -166,7 +167,7 @@ def _fail(row: dict, err: str):
 
 
 # ---------- GPU ----------
-@app.cls(image=gpu_image, gpu="L40S", volumes={"/cache": cache}, secrets=secrets, timeout=20 * 60,
+@app.cls(image=gpu_image, gpu=GPU, volumes={"/cache": cache}, secrets=secrets, timeout=20 * 60,
          max_containers=1, scaledown_window=60)
 class Wan:
     @modal.enter()
@@ -178,7 +179,8 @@ class Wan:
         t = time.time()
         vae = AutoencoderKLWan.from_pretrained(MODEL, subfolder="vae", torch_dtype=torch.float32)
         self.pipe = WanImageToVideoPipeline.from_pretrained(MODEL, vae=vae, torch_dtype=torch.bfloat16,
-                                                            expand_timesteps=True).to("cuda")
+                                                            expand_timesteps=True)
+        self.pipe.enable_model_cpu_offload()  # 24 GB GPU: text encoder and transformer take turns
         self.cap_proc = BlipProcessor.from_pretrained(CAPTIONER)
         self.cap = BlipForConditionalGeneration.from_pretrained(CAPTIONER, torch_dtype=torch.float16).to("cuda").eval()
         cache.commit()
