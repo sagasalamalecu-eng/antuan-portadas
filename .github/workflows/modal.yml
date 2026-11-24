@@ -1,0 +1,66 @@
+# Sube el servidor de portadas con Wan 2.2 (modal_wan.py) a Modal, sin el PC.
+# Necesita los secretos MODAL_TOKEN_ID y MODAL_TOKEN_SECRET (modal.com → Settings → API Tokens).
+# Mientras no estén, cada 2 h mira si ya están; cuando despliega bien, hace una prueba y apaga esa espera.
+name: Modal Wan
+
+on:
+  push:
+    paths: [modal_wan.py, .github/workflows/modal.yml]
+  workflow_dispatch:
+  schedule:
+    - cron: '23 */2 * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: modal
+  cancel-in-progress: false
+
+jobs:
+  desplegar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - name: ¿Están las claves de Modal?
+        id: claves
+        run: |
+          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
+            echo "Aún no hay claves de Modal (MODAL_TOKEN_ID / MODAL_TOKEN_SECRET)."; echo "ok=no" >> "$GITHUB_OUTPUT"
+          else echo "ok=si" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/checkout@v4
+        if: steps.claves.outputs.ok == 'si'
+
+      - uses: actions/setup-python@v5
+        if: steps.claves.outputs.ok == 'si'
+        with: { python-version: '3.11' }
+
+      - name: Desplegar en Modal
+        if: steps.claves.outputs.ok == 'si'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          pip install -q modal
+          modal secret create antuan-supabase SUPABASE_URL="$SUPABASE_URL" SUPABASE_SERVICE_KEY="$SUPABASE_SERVICE_KEY" --force
+          modal deploy modal_wan.py
+
+      - name: Prueba (Teléfono Nuevo)
+        if: steps.claves.outputs.ok == 'si'
+        run: modal run modal_wan.py::test --out prueba_wan.mp4
+
+      - uses: actions/upload-artifact@v4
+        if: steps.claves.outputs.ok == 'si'
+        with: { name: prueba-wan, path: prueba_wan.mp4 }
+
+      # desplegado y probado: Modal ya trabaja solo, así que este workflow se apaga para no gastar minutos
+      # cada 2 h (para volver a desplegar tras un cambio: gh workflow enable modal.yml y gh workflow run modal.yml)
+      - name: Apagar este workflow
+        if: steps.claves.outputs.ok == 'si'
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: gh workflow disable modal.yml -R "${{ github.repository }}"

@@ -35,7 +35,7 @@ jobs:
         run: |
           n=$(curl -s "$SUPABASE_URL/rest/v1/cover_loops?status=in.(queued,processing)&select=cover_key" -H "apikey: $SUPABASE_SERVICE_KEY" | grep -o cover_key | wc -l)
           # portadas hechas sin vídeo IA (cupo diario de Hugging Face gastado): se rehacen cuando hay cupo
-          m=$(curl -s -G "$SUPABASE_URL/rest/v1/cover_loops" --data-urlencode "status=eq.done" --data-urlencode "video_path=not.like.ai-*" --data-urlencode "select=cover_key" --data-urlencode "limit=1" -H "apikey: $SUPABASE_SERVICE_KEY" | grep -o cover_key | wc -l)
+          m=$(curl -s -G "$SUPABASE_URL/rest/v1/cover_loops" --data-urlencode "status=eq.done" --data-urlencode "video_path=not.like.ai-*" --data-urlencode "video_path=not.like.w5-*" --data-urlencode "select=cover_key" --data-urlencode "limit=1" -H "apikey: $SUPABASE_SERVICE_KEY" | grep -o cover_key | wc -l)
           [ -z "$HF_TOKEN" ] && m=0
           echo "pendientes=$((n + m))" >> "$GITHUB_OUTPUT"
           echo "Pendientes: $n · sin vídeo IA por rehacer: $m"

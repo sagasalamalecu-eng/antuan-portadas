@@ -419,7 +419,7 @@ def upgrade(max_seconds: float) -> int:
         return 0
     start, done, skip = time.time(), 0, set()
     while time.time() - start < max_seconds and not HF_OUT:
-        rows = rest("GET", "cover_loops?status=eq.done&video_path=not.like.ai-*&order=requested_at.desc&limit=25"
+        rows = rest("GET", "cover_loops?status=eq.done&video_path=not.like.ai-*&video_path=not.like.w5-*&order=requested_at.desc&limit=25"
                     "&select=cover_key,cover_url,video_path", headers=H())
         rows = [r for r in rows or [] if r["cover_key"] not in skip]
         if not rows:
