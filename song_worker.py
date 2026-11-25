@@ -203,7 +203,13 @@ def work(vid: str):
         evict()
     except Exception as e:
         print(f"[fallo] {vid}: {e}")
-        finish(vid, status="failed", error=str(e)[:500])
+        msg = str(e)
+        if "Sign in" in msg or "COOKIES" in msg or "not a bot" in msg:
+            # YouTube blocked the session: keep it in the queue (it'll download once the cookies are renewed)
+            # and stop this batch instead of burning the whole queue as "failed"
+            finish(vid, status="queued", error=msg[:500])
+            raise SystemExit("YouTube pide iniciar sesión: renueva YT_COOKIES (ver ESTADO.md); la cola se conserva")
+        finish(vid, status="failed", error=msg[:500])
     finally:
         shutil.rmtree(folder, ignore_errors=True)
 
