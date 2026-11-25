@@ -198,7 +198,8 @@ def work(vid: str):
         path = upload(vid, f)
         finish(vid, status="done", path=path, bytes=size, error=None)
         print(f"[ok] {vid}  {size / 1048576:.1f} MB  {time.time() - t:.0f}s")
-        ritmo(vid, f)
+        if os.environ.get("RITMO") == "1":  # off by default: downloads go first, as fast as possible
+            ritmo(vid, f)
         evict()
     except Exception as e:
         print(f"[fallo] {vid}: {e}")
@@ -277,7 +278,7 @@ def drain(max_seconds: float = 20 * 60) -> int:
         n += 1
     # spare time: analyse older songs for Modo Teclas
     left = max_seconds - (time.time() - start)
-    if left > 60:
+    if left > 60 and os.environ.get("RITMO") == "1":
         ritmo_missing(left - 30)
     return n
 

@@ -83,4 +83,4 @@ jobs:
           # pide "confirma que no eres un bot" a los servidores de GitHub
           if [ -n "$YT_COOKIES" ]; then echo "$YT_COOKIES" > "$RUNNER_TEMP/cookies.txt"; export YT_COOKIES_FILE="$RUNNER_TEMP/cookies.txt"; fi
           python -X utf8 song_worker.py --drain
-          if [ "${{ inputs.ritmo }}" = "true" ]; then python -X utf8 song_worker.py --ritmo; fi
+          if [ "${{ inputs.ritmo }}" = "true" ]; then pip install -q librosa && python -X utf8 song_worker.py --ritmo; fi
